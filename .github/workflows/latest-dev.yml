@@ -1,0 +1,53 @@
+name: Latest Dev Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: latest-dev-release
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build release artifacts
+        run: |
+          mkdir -p dist
+          GOOS=darwin GOARCH=arm64 go build -o dist/qq-darwin-arm64 ./cmd/qq
+          GOOS=darwin GOARCH=amd64 go build -o dist/qq-darwin-amd64 ./cmd/qq
+          GOOS=linux GOARCH=amd64 go build -o dist/qq-linux-amd64 ./cmd/qq
+          GOOS=windows GOARCH=amd64 go build -o dist/qq-windows-amd64.exe ./cmd/qq
+
+      - name: Delete previous latest-dev release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete latest-dev --cleanup-tag --yes || true
+
+      - name: Create latest-dev release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create latest-dev dist/* \
+            --target "${GITHUB_SHA}" \
+            --title "latest-dev" \
+            --notes "Development build for commit ${GITHUB_SHA}" \
+            --prerelease

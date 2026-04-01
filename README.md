@@ -16,13 +16,20 @@ qq --backend gemini "what is tail recursion?"
 go install github.com/palmchou/quick-question/cmd/qq@latest
 ```
 
-This installs a `qq` binary on your `PATH`.
+This installs a `qq` binary into your Go bin directory, which is usually `~/go/bin`.
 
-## Build
+If `qq` is not found after install, add `~/go/bin` to your shell `PATH`. For `zsh`:
 
 ```bash
-go build -o qq ./cmd/qq
+echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
 ```
+
+## Prerequisites
+
+- The chosen backend's binary must be installed and available on `PATH`.
+- Supported backends are `codex`, `claude`, and `gemini`.
+- You must already be authenticated directly with the respective CLI before using `qq`.
 
 ## Backends
 
@@ -42,5 +49,4 @@ go build -o qq ./cmd/qq
 
 ## Notes
 
-- The chosen backend's binary must be installed and available on `PATH`.
 - `go install github.com/palmchou/quick-question@latest` would produce a `quick-question` binary, not `qq`. To install a `qq` binary directly, the Go entrypoint lives at `cmd/qq`.

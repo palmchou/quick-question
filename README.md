@@ -12,12 +12,16 @@ qq --backend gemini "what is tail recursion?"
 
 ## Install
 
-*TODO*
+```bash
+go install github.com/palmchou/quick-question/cmd/qq@latest
+```
+
+This installs a `qq` binary on your `PATH`.
 
 ## Build
 
 ```bash
-go build -o qq .
+go build -o qq ./cmd/qq
 ```
 
 ## Backends
@@ -39,3 +43,4 @@ go build -o qq .
 ## Notes
 
 - The chosen backend's binary must be installed and available on `PATH`.
+- `go install github.com/palmchou/quick-question@latest` would produce a `quick-question` binary, not `qq`. To install a `qq` binary directly, the Go entrypoint lives at `cmd/qq`.

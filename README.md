@@ -37,7 +37,7 @@ source ~/.zshrc
 
 | Backend | Command invoked |
 |---------|-----------------|
-| `codex` | `codex exec --ephemeral --skip-git-repo-check --sandbox read-only` |
+| `codex` | `codex exec --ephemeral --skip-git-repo-check --json --sandbox read-only` |
 | `claude`| `claude -p` |
 | `gemini`| `gemini -p` |
 

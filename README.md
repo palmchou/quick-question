@@ -10,6 +10,8 @@ qq --backend claude "explain CAP theorem in one paragraph"
 qq --backend gemini "what is tail recursion?"
 ```
 
+By default, `qq` uses `codex`, unless you override that in config.
+
 ## Install
 
 ```bash
@@ -27,9 +29,37 @@ source ~/.zshrc
 
 ## Prerequisites
 
-- The chosen backend's binary must be installed and available on `PATH`.
+- The chosen backend's binary must be installed and either available on `PATH` or configured explicitly in `qq`'s config file.
 - Supported backends are `codex`, `claude`, and `gemini`.
 - You must already be authenticated directly with the respective CLI before using `qq`.
+
+## Configuration
+
+`qq` reads optional configuration from:
+
+```bash
+~/.config/qq/config.json
+```
+
+The config file can set a default backend and explicit paths to backend CLIs:
+
+```json
+{
+  "default_backend": "claude",
+  "backend_paths": {
+    "codex": "/opt/homebrew/bin/codex",
+    "claude": "/Users/you/bin/claude",
+    "gemini": "/Users/you/bin/gemini"
+  }
+}
+```
+
+Fields:
+
+- `default_backend`: optional default backend when `--backend` is not provided
+- `backend_paths`: optional per-backend binary paths to use instead of looking on `PATH`
+
+The `--backend` flag still takes precedence over `default_backend`.
 
 ## Backends
 

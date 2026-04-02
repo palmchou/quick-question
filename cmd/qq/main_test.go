@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -109,5 +112,80 @@ func TestBuildBackendCodexIncludesJSONFlag(t *testing.T) {
 
 	if !found {
 		t.Fatal("expected codex backend args to include --json")
+	}
+}
+
+func TestLoadUserConfigMissingFile(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := loadUserConfig(filepath.Join(t.TempDir(), "missing.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.DefaultBackend != "" {
+		t.Fatalf("expected empty default backend, got %q", cfg.DefaultBackend)
+	}
+	if len(cfg.BackendPaths) != 0 {
+		t.Fatalf("expected no backend paths, got %#v", cfg.BackendPaths)
+	}
+}
+
+func TestLoadUserConfigParsesJSON(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	want := userConfig{
+		DefaultBackend: "claude",
+		BackendPaths: map[string]string{
+			"codex":  "/opt/codex/bin/codex",
+			"claude": "/opt/claude/bin/claude",
+		},
+	}
+
+	data, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("failed to marshal config: %v", err)
+	}
+
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	got, err := loadUserConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got.DefaultBackend != want.DefaultBackend {
+		t.Fatalf("expected default backend %q, got %q", want.DefaultBackend, got.DefaultBackend)
+	}
+	if got.BackendPaths["codex"] != want.BackendPaths["codex"] {
+		t.Fatalf("expected codex path %q, got %q", want.BackendPaths["codex"], got.BackendPaths["codex"])
+	}
+	if got.BackendPaths["claude"] != want.BackendPaths["claude"] {
+		t.Fatalf("expected claude path %q, got %q", want.BackendPaths["claude"], got.BackendPaths["claude"])
+	}
+}
+
+func TestApplyConfigToBackendOverridesBinary(t *testing.T) {
+	t.Parallel()
+
+	cfg := backendConfig{
+		binary: "codex",
+		args:   []string{"exec"},
+	}
+
+	userCfg := userConfig{
+		BackendPaths: map[string]string{
+			"codex": "/custom/bin/codex",
+		},
+	}
+
+	got := applyConfigToBackend(cfg, "codex", userCfg)
+	if got.binary != "/custom/bin/codex" {
+		t.Fatalf("expected configured binary path, got %q", got.binary)
 	}
 }

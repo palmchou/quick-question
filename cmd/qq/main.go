@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -37,15 +38,31 @@ type backendConfig struct {
 	args   []string
 }
 
+type userConfig struct {
+	DefaultBackend string            `json:"default_backend"`
+	BackendPaths   map[string]string `json:"backend_paths"`
+}
+
 func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
 func run(args []string) int {
+	cfg, err := loadUserConfig(defaultConfigPath())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+
+	defaultBackend := "codex"
+	if cfg.DefaultBackend != "" {
+		defaultBackend = cfg.DefaultBackend
+	}
+
 	flags := flag.NewFlagSet("qq", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 
-	backendName := flags.String("backend", "codex", "AI backend to use: codex, claude, or gemini")
+	backendName := flags.String("backend", defaultBackend, "AI backend to use: codex, claude, or gemini")
 
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -58,22 +75,23 @@ func run(args []string) int {
 	}
 	question = wrapQuestion(question)
 
-	cfg, err := buildBackend(*backendName)
+	backendCfg, err := buildBackend(*backendName)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
+	backendCfg = applyConfigToBackend(backendCfg, *backendName, cfg)
 
-	if _, err := exec.LookPath(cfg.binary); err != nil {
-		fmt.Fprintf(os.Stderr, "%s is not installed or not on PATH\n", cfg.binary)
+	if _, err := resolveBinaryPath(backendCfg.binary); err != nil {
+		fmt.Fprintf(os.Stderr, "%s is not installed, not executable, or not on PATH\n", backendCfg.binary)
 		return 127
 	}
 
 	if strings.EqualFold(*backendName, "codex") {
-		return runCodex(cfg, question)
+		return runCodex(backendCfg, question)
 	}
 
-	cmd := exec.Command(cfg.binary, append(cfg.args, question)...)
+	cmd := exec.Command(backendCfg.binary, append(backendCfg.args, question)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -93,6 +111,65 @@ func run(args []string) int {
 
 func wrapQuestion(question string) string {
 	return fmt.Sprintf(defaultSystemPrompt, question)
+}
+
+func defaultConfigPath() string {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+
+	return filepath.Join(configDir, "qq", "config.json")
+}
+
+func loadUserConfig(path string) (userConfig, error) {
+	if path == "" {
+		return userConfig{}, nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return userConfig{}, nil
+		}
+		return userConfig{}, fmt.Errorf("failed to read config file %q: %w", path, err)
+	}
+
+	var cfg userConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return userConfig{}, fmt.Errorf("failed to parse config file %q: %w", path, err)
+	}
+
+	return cfg, nil
+}
+
+func applyConfigToBackend(cfg backendConfig, backendName string, userCfg userConfig) backendConfig {
+	if userCfg.BackendPaths == nil {
+		return cfg
+	}
+
+	configuredPath := strings.TrimSpace(userCfg.BackendPaths[strings.ToLower(strings.TrimSpace(backendName))])
+	if configuredPath == "" {
+		return cfg
+	}
+
+	cfg.binary = configuredPath
+	return cfg
+}
+
+func resolveBinaryPath(binary string) (string, error) {
+	if strings.ContainsRune(binary, os.PathSeparator) {
+		info, err := os.Stat(binary)
+		if err != nil {
+			return "", err
+		}
+		if info.IsDir() {
+			return "", fmt.Errorf("%q is a directory", binary)
+		}
+		return binary, nil
+	}
+
+	return exec.LookPath(binary)
 }
 
 func runCodex(cfg backendConfig, question string) int {

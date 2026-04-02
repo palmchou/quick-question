@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 )
 
 const defaultSystemPrompt = `
@@ -32,6 +34,8 @@ Now answer the question to your best knowledge.</system-reminder>
 %s
 </user-question>
 `
+
+const spinnerMessage = "Waiting for response..."
 
 type backendConfig struct {
 	binary string
@@ -91,18 +95,72 @@ func run(args []string) int {
 		return runCodex(backendCfg, question)
 	}
 
-	cmd := exec.Command(backendCfg.binary, append(backendCfg.args, question)...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	return runStreamingBackend(backendCfg, question)
+}
 
-	if err := cmd.Run(); err != nil {
+func runStreamingBackend(cfg backendConfig, question string) int {
+	cmd := exec.Command(cfg.binary, append(cfg.args, question)...)
+	cmd.Stdin = os.Stdin
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
+	spinner := startSpinner(os.Stderr, shouldShowSpinner(os.Stderr), spinnerMessage)
+
+	var stopOnce sync.Once
+	stopSpinner := func() {
+		stopOnce.Do(func() {
+			spinner.Stop()
+		})
+	}
+
+	results := make(chan copyResult, 2)
+	var firstOutput sync.Once
+	go func() {
+		results <- copyResult{
+			stream: "stdout",
+			err:    proxyCommandOutput(os.Stdout, stdout, &firstOutput, stopSpinner),
+		}
+	}()
+	go func() {
+		results <- copyResult{
+			stream: "stderr",
+			err:    proxyCommandOutput(os.Stderr, stderr, &firstOutput, stopSpinner),
+		}
+	}()
+
+	waitErr := cmd.Wait()
+	stopSpinner()
+
+	for i := 0; i < 2; i++ {
+		result := <-results
+		if result.err != nil {
+			fmt.Fprintf(os.Stderr, "failed to stream backend %s: %v\n", result.stream, result.err)
+			return 1
+		}
+	}
+
+	if waitErr != nil {
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if errors.As(waitErr, &exitErr) {
 			return exitErr.ExitCode()
 		}
 
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, waitErr)
 		return 1
 	}
 
@@ -190,8 +248,10 @@ func runCodex(cfg backendConfig, question string) int {
 		return 1
 	}
 
+	spinner := startSpinner(os.Stderr, shouldShowSpinner(os.Stderr), spinnerMessage)
 	message, parseErr := extractCodexMessage(stdout)
 	waitErr := cmd.Wait()
+	spinner.Stop()
 
 	if waitErr != nil {
 		if stderr.Len() > 0 {
@@ -222,6 +282,135 @@ func runCodex(cfg backendConfig, question string) int {
 
 	fmt.Fprintln(os.Stdout, message)
 	return 0
+}
+
+type copyResult struct {
+	stream string
+	err    error
+}
+
+func proxyCommandOutput(dst io.Writer, src io.Reader, once *sync.Once, onFirstOutput func()) error {
+	_, err := io.Copy(&firstOutputWriter{
+		dst:           dst,
+		once:          once,
+		onFirstOutput: onFirstOutput,
+	}, src)
+	return err
+}
+
+type firstOutputWriter struct {
+	dst           io.Writer
+	once          *sync.Once
+	onFirstOutput func()
+}
+
+func (w *firstOutputWriter) Write(p []byte) (int, error) {
+	if len(p) > 0 && w.onFirstOutput != nil {
+		if w.once != nil {
+			w.once.Do(w.onFirstOutput)
+		} else {
+			w.onFirstOutput()
+		}
+	}
+
+	return w.dst.Write(p)
+}
+
+func shouldShowSpinner(file *os.File) bool {
+	if file == nil {
+		return false
+	}
+
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+type spinner struct {
+	out      io.Writer
+	enabled  bool
+	message  string
+	interval time.Duration
+	frames   []byte
+	done     chan struct{}
+	stopped  chan struct{}
+	mu       sync.Mutex
+	lastLen  int
+}
+
+func startSpinner(out io.Writer, enabled bool, message string) *spinner {
+	s := &spinner{
+		out:      out,
+		enabled:  enabled,
+		message:  message,
+		interval: 120 * time.Millisecond,
+		frames:   []byte{'|', '/', '-', '\\'},
+		done:     make(chan struct{}),
+		stopped:  make(chan struct{}),
+	}
+
+	if !enabled {
+		close(s.stopped)
+		return s
+	}
+
+	go s.run()
+	return s
+}
+
+func (s *spinner) Stop() {
+	if !s.enabled {
+		return
+	}
+
+	select {
+	case <-s.done:
+	default:
+		close(s.done)
+	}
+
+	<-s.stopped
+	s.clear()
+}
+
+func (s *spinner) run() {
+	defer close(s.stopped)
+
+	ticker := time.NewTicker(s.interval)
+	defer ticker.Stop()
+
+	for i := 0; ; i++ {
+		select {
+		case <-s.done:
+			return
+		case <-ticker.C:
+			s.render(i)
+		}
+	}
+}
+
+func (s *spinner) render(frame int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	text := fmt.Sprintf("\r%c %s", s.frames[frame%len(s.frames)], s.message)
+	_, _ = io.WriteString(s.out, text)
+	s.lastLen = len(text) - 1
+}
+
+func (s *spinner) clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.lastLen == 0 {
+		return
+	}
+
+	_, _ = io.WriteString(s.out, "\r"+strings.Repeat(" ", s.lastLen)+"\r")
+	s.lastLen = 0
 }
 
 func extractCodexMessage(r io.Reader) (string, error) {

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -187,5 +190,65 @@ func TestApplyConfigToBackendOverridesBinary(t *testing.T) {
 	got := applyConfigToBackend(cfg, "codex", userCfg)
 	if got.binary != "/custom/bin/codex" {
 		t.Fatalf("expected configured binary path, got %q", got.binary)
+	}
+}
+
+func TestProxyCommandOutputCopiesAndStopsOnceAcrossStreams(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var firstOutput sync.Once
+	stops := 0
+	stopSpinner := func() {
+		stops++
+	}
+
+	if err := proxyCommandOutput(&stdout, strings.NewReader("hello"), &firstOutput, stopSpinner); err != nil {
+		t.Fatalf("unexpected error copying stdout: %v", err)
+	}
+	if err := proxyCommandOutput(io.Discard, strings.NewReader("world"), &firstOutput, stopSpinner); err != nil {
+		t.Fatalf("unexpected error copying stderr: %v", err)
+	}
+
+	if stdout.String() != "hello" {
+		t.Fatalf("expected copied stdout %q, got %q", "hello", stdout.String())
+	}
+	if stops != 1 {
+		t.Fatalf("expected spinner stop callback once, got %d", stops)
+	}
+}
+
+func TestProxyCommandOutputSkipsStopWhenNoOutputArrives(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var firstOutput sync.Once
+	stops := 0
+
+	if err := proxyCommandOutput(&stdout, strings.NewReader(""), &firstOutput, func() {
+		stops++
+	}); err != nil {
+		t.Fatalf("unexpected error copying output: %v", err)
+	}
+
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no copied output, got %q", stdout.String())
+	}
+	if stops != 0 {
+		t.Fatalf("expected spinner stop callback not to run, got %d", stops)
+	}
+}
+
+func TestShouldShowSpinnerFalseForRegularFile(t *testing.T) {
+	t.Parallel()
+
+	file, err := os.CreateTemp(t.TempDir(), "stderr-*")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer file.Close()
+
+	if shouldShowSpinner(file) {
+		t.Fatal("expected spinner to be disabled for a regular file")
 	}
 }

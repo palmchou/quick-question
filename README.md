@@ -80,3 +80,4 @@ The `--backend` flag still takes precedence over `default_backend`.
 ## Notes
 
 - `go install github.com/palmchou/quick-question@latest` would produce a `quick-question` binary, not `qq`. To install a `qq` binary directly, the Go entrypoint lives at `cmd/qq`.
+- On interactive terminals, `qq` shows a small spinner on `stderr` while the selected backend is still silent. It clears itself as soon as output starts or the command finishes, so redirected output is not polluted.

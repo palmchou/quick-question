@@ -40,11 +40,25 @@ const spinnerMessage = "Waiting for response..."
 type backendConfig struct {
 	binary string
 	args   []string
+	mode   backendMode
+}
+
+type backendMode string
+
+const (
+	backendModeStreaming backendMode = "streaming"
+	backendModeCodexJSON backendMode = "codex_json"
+)
+
+type configuredBackend struct {
+	Path string   `json:"path"`
+	Args []string `json:"args"`
 }
 
 type userConfig struct {
-	DefaultBackend string            `json:"default_backend"`
-	BackendPaths   map[string]string `json:"backend_paths"`
+	DefaultBackend string                       `json:"default_backend"`
+	BackendPaths   map[string]string            `json:"backend_paths"`
+	Backends       map[string]configuredBackend `json:"backends"`
 }
 
 func main() {
@@ -66,7 +80,7 @@ func run(args []string) int {
 	flags := flag.NewFlagSet("qq", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 
-	backendName := flags.String("backend", defaultBackend, "AI backend to use: codex, claude, or gemini")
+	backendName := flags.String("backend", defaultBackend, "Backend name to use")
 
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -74,24 +88,23 @@ func run(args []string) int {
 
 	question := strings.TrimSpace(strings.Join(flags.Args(), " "))
 	if question == "" {
-		fmt.Fprintln(os.Stderr, `usage: qq [--backend codex|claude|gemini] "your question"`)
+		fmt.Fprintln(os.Stderr, `usage: qq [--backend name] "your question"`)
 		return 2
 	}
 	question = wrapQuestion(question)
 
-	backendCfg, err := buildBackend(*backendName)
+	backendCfg, err := resolveBackend(*backendName, cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	backendCfg = applyConfigToBackend(backendCfg, *backendName, cfg)
 
 	if _, err := resolveBinaryPath(backendCfg.binary); err != nil {
 		fmt.Fprintf(os.Stderr, "%s is not installed, not executable, or not on PATH\n", backendCfg.binary)
 		return 127
 	}
 
-	if strings.EqualFold(*backendName, "codex") {
+	if backendCfg.mode == backendModeCodexJSON {
 		return runCodex(backendCfg, question)
 	}
 
@@ -201,18 +214,84 @@ func loadUserConfig(path string) (userConfig, error) {
 	return cfg, nil
 }
 
-func applyConfigToBackend(cfg backendConfig, backendName string, userCfg userConfig) backendConfig {
+func applyLegacyPathOverride(cfg backendConfig, backendName string, userCfg userConfig) backendConfig {
 	if userCfg.BackendPaths == nil {
 		return cfg
 	}
 
-	configuredPath := strings.TrimSpace(userCfg.BackendPaths[strings.ToLower(strings.TrimSpace(backendName))])
+	configuredPath := strings.TrimSpace(userCfg.BackendPaths[normalizeBackendName(backendName)])
 	if configuredPath == "" {
 		return cfg
 	}
 
 	cfg.binary = configuredPath
 	return cfg
+}
+
+func resolveBackend(name string, userCfg userConfig) (backendConfig, error) {
+	normalizedName := normalizeBackendName(name)
+	if normalizedName == "" {
+		return backendConfig{}, fmt.Errorf("backend name cannot be empty")
+	}
+
+	cfg, builtIn := buildBuiltinBackend(normalizedName)
+	customCfg, hasCustom := lookupConfiguredBackend(userCfg.Backends, normalizedName)
+	if !builtIn && !hasCustom {
+		return backendConfig{}, fmt.Errorf("unsupported backend %q", name)
+	}
+
+	if hasCustom {
+		cfg = mergeConfiguredBackend(cfg, customCfg)
+		if !builtIn {
+			cfg.mode = backendModeStreaming
+		}
+	}
+
+	cfg = applyLegacyPathOverride(cfg, normalizedName, userCfg)
+
+	if strings.TrimSpace(cfg.binary) == "" {
+		return backendConfig{}, fmt.Errorf("backend %q must define a path", name)
+	}
+
+	if cfg.mode == backendModeCodexJSON && !hasArg(cfg.args, "--json") {
+		return backendConfig{}, fmt.Errorf("backend %q must include --json in args", name)
+	}
+
+	return cfg, nil
+}
+
+func mergeConfiguredBackend(base backendConfig, custom configuredBackend) backendConfig {
+	if path := strings.TrimSpace(custom.Path); path != "" {
+		base.binary = path
+	}
+	if custom.Args != nil {
+		base.args = append([]string(nil), custom.Args...)
+	}
+	return base
+}
+
+func lookupConfiguredBackend(backends map[string]configuredBackend, name string) (configuredBackend, bool) {
+	for configuredName, cfg := range backends {
+		if normalizeBackendName(configuredName) == name {
+			return cfg, true
+		}
+	}
+
+	return configuredBackend{}, false
+}
+
+func normalizeBackendName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func hasArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+
+	return false
 }
 
 func resolveBinaryPath(binary string) (string, error) {
@@ -450,8 +529,8 @@ type codexEvent struct {
 	} `json:"item"`
 }
 
-func buildBackend(name string) (backendConfig, error) {
-	switch strings.ToLower(strings.TrimSpace(name)) {
+func buildBuiltinBackend(name string) (backendConfig, bool) {
+	switch normalizeBackendName(name) {
 	case "codex":
 		return backendConfig{
 			binary: "codex",
@@ -463,18 +542,21 @@ func buildBackend(name string) (backendConfig, error) {
 				"--sandbox",
 				"read-only",
 			},
-		}, nil
+			mode: backendModeCodexJSON,
+		}, true
 	case "claude":
 		return backendConfig{
 			binary: "claude",
 			args:   []string{"-p"},
-		}, nil
+			mode:   backendModeStreaming,
+		}, true
 	case "gemini":
 		return backendConfig{
 			binary: "gemini",
 			args:   []string{"-p"},
-		}, nil
+			mode:   backendModeStreaming,
+		}, true
 	default:
-		return backendConfig{}, fmt.Errorf("unsupported backend %q", name)
+		return backendConfig{}, false
 	}
 }

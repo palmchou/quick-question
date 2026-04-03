@@ -8,9 +8,10 @@ A minimal CLI tool for asking quick questions to AI assistants from your termina
 qq "what does git rebase --onto do?"
 qq --backend claude "explain CAP theorem in one paragraph"
 qq --backend gemini "what is tail recursion?"
+qq --backend work-claude "summarize Raft leader election"
 ```
 
-By default, `qq` uses `codex`, unless you override that in config.
+By default, `qq` uses `codex`, unless you override that in config. `--backend` can target either a built-in backend or a named custom backend from your config file.
 
 ## Install
 
@@ -30,7 +31,7 @@ source ~/.zshrc
 ## Prerequisites
 
 - The chosen backend's binary must be installed and either available on `PATH` or configured explicitly in `qq`'s config file.
-- Supported backends are `codex`, `claude`, and `gemini`.
+- Built-in backends are `codex`, `claude`, and `gemini`. You can also define additional named backends in config.
 - You must already be authenticated directly with the respective CLI before using `qq`.
 
 ## Configuration
@@ -41,15 +42,28 @@ source ~/.zshrc
 ~/.config/qq/config.json
 ```
 
-The config file can set a default backend and explicit paths to backend CLIs:
+The config file can set a default backend, override built-in backends, and define entirely new named backends:
 
 ```json
 {
-  "default_backend": "claude",
-  "backend_paths": {
-    "codex": "/opt/homebrew/bin/codex",
-    "claude": "/Users/you/bin/claude",
-    "gemini": "/Users/you/bin/gemini"
+  "default_backend": "work-claude",
+  "backends": {
+    "codex": {
+      "path": "/opt/homebrew/bin/codex",
+      "args": ["exec", "--ephemeral", "--skip-git-repo-check", "--json", "--sandbox", "read-only"]
+    },
+    "claude": {
+      "path": "/Users/you/bin/claude",
+      "args": ["-p"]
+    },
+    "work-claude": {
+      "path": "/Users/you/bin/claude",
+      "args": ["-p", "--model", "sonnet"]
+    },
+    "local-wrapper": {
+      "path": "/Users/you/bin/ask-ai",
+      "args": ["--stdio"]
+    }
   }
 }
 ```
@@ -57,13 +71,16 @@ The config file can set a default backend and explicit paths to backend CLIs:
 Fields:
 
 - `default_backend`: optional default backend when `--backend` is not provided
-- `backend_paths`: optional per-backend binary paths to use instead of looking on `PATH`
+- `backends`: optional named backend definitions
+- `backends.<name>.path`: optional binary path for that backend
+- `backends.<name>.args`: optional argument list for that backend
+- `backend_paths`: optional legacy path-only overrides for built-in backends
 
 The `--backend` flag still takes precedence over `default_backend`.
 
 ## Backends
 
-`qq` forwards a question to your AI CLI of choice and streams the response back. It supports three backends:
+`qq` forwards a question to your AI CLI of choice and streams the response back. These are the built-in backend definitions:
 
 | Backend | Command invoked |
 |---------|-----------------|
@@ -71,13 +88,16 @@ The `--backend` flag still takes precedence over `default_backend`.
 | `claude`| `claude -p` |
 | `gemini`| `gemini -p` |
 
+Custom backends use the configured `path` and `args` from `config.json`.
+
 ### Options
 
 | Flag | Description |
 |------|-------------|
-| `--backend` | AI backend to use: `codex`, `claude`, or `gemini` (default: `codex`) |
+| `--backend` | Backend name to use. This can be a built-in backend or a custom backend defined in config. |
 
 ## Notes
 
 - `go install github.com/palmchou/quick-question@latest` would produce a `quick-question` binary, not `qq`. To install a `qq` binary directly, the Go entrypoint lives at `cmd/qq`.
 - On interactive terminals, `qq` shows a small spinner on `stderr` while the selected backend is still silent. It clears itself as soon as output starts or the command finishes, so redirected output is not polluted.
+- If you override the built-in `codex` backend, keep `--json` in its args. `qq` expects Codex JSON output so it can print the final answer cleanly.

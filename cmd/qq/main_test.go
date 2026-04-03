@@ -93,12 +93,12 @@ func TestExtractCodexMessage(t *testing.T) {
 	}
 }
 
-func TestBuildBackendCodexIncludesJSONFlag(t *testing.T) {
+func TestBuildBuiltinBackendCodexIncludesJSONFlag(t *testing.T) {
 	t.Parallel()
 
-	cfg, err := buildBackend("codex")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	cfg, ok := buildBuiltinBackend("codex")
+	if !ok {
+		t.Fatal("expected codex builtin backend")
 	}
 
 	if cfg.binary != "codex" {
@@ -132,6 +132,9 @@ func TestLoadUserConfigMissingFile(t *testing.T) {
 	if len(cfg.BackendPaths) != 0 {
 		t.Fatalf("expected no backend paths, got %#v", cfg.BackendPaths)
 	}
+	if len(cfg.Backends) != 0 {
+		t.Fatalf("expected no custom backends, got %#v", cfg.Backends)
+	}
 }
 
 func TestLoadUserConfigParsesJSON(t *testing.T) {
@@ -145,6 +148,12 @@ func TestLoadUserConfigParsesJSON(t *testing.T) {
 		BackendPaths: map[string]string{
 			"codex":  "/opt/codex/bin/codex",
 			"claude": "/opt/claude/bin/claude",
+		},
+		Backends: map[string]configuredBackend{
+			"work-claude": {
+				Path: "/Users/you/bin/claude-wrapper",
+				Args: []string{"-p", "--model", "sonnet"},
+			},
 		},
 	}
 
@@ -171,9 +180,15 @@ func TestLoadUserConfigParsesJSON(t *testing.T) {
 	if got.BackendPaths["claude"] != want.BackendPaths["claude"] {
 		t.Fatalf("expected claude path %q, got %q", want.BackendPaths["claude"], got.BackendPaths["claude"])
 	}
+	if got.Backends["work-claude"].Path != want.Backends["work-claude"].Path {
+		t.Fatalf("expected custom backend path %q, got %q", want.Backends["work-claude"].Path, got.Backends["work-claude"].Path)
+	}
+	if strings.Join(got.Backends["work-claude"].Args, " ") != strings.Join(want.Backends["work-claude"].Args, " ") {
+		t.Fatalf("expected custom backend args %#v, got %#v", want.Backends["work-claude"].Args, got.Backends["work-claude"].Args)
+	}
 }
 
-func TestApplyConfigToBackendOverridesBinary(t *testing.T) {
+func TestApplyLegacyPathOverrideOverridesBinary(t *testing.T) {
 	t.Parallel()
 
 	cfg := backendConfig{
@@ -187,9 +202,76 @@ func TestApplyConfigToBackendOverridesBinary(t *testing.T) {
 		},
 	}
 
-	got := applyConfigToBackend(cfg, "codex", userCfg)
+	got := applyLegacyPathOverride(cfg, "codex", userCfg)
 	if got.binary != "/custom/bin/codex" {
 		t.Fatalf("expected configured binary path, got %q", got.binary)
+	}
+}
+
+func TestResolveBackendUsesCustomBackendDefinition(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := resolveBackend("work-claude", userConfig{
+		Backends: map[string]configuredBackend{
+			"work-claude": {
+				Path: "/Users/you/bin/claude-wrapper",
+				Args: []string{"-p", "--model", "sonnet"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.binary != "/Users/you/bin/claude-wrapper" {
+		t.Fatalf("expected custom backend path, got %q", cfg.binary)
+	}
+	if cfg.mode != backendModeStreaming {
+		t.Fatalf("expected streaming mode, got %q", cfg.mode)
+	}
+	if strings.Join(cfg.args, " ") != "-p --model sonnet" {
+		t.Fatalf("expected custom args, got %#v", cfg.args)
+	}
+}
+
+func TestResolveBackendOverridesBuiltinArgsAndPath(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := resolveBackend("claude", userConfig{
+		Backends: map[string]configuredBackend{
+			"claude": {
+				Path: "/Users/you/bin/claude",
+				Args: []string{"-p", "--model", "opus"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.binary != "/Users/you/bin/claude" {
+		t.Fatalf("expected overridden path, got %q", cfg.binary)
+	}
+	if strings.Join(cfg.args, " ") != "-p --model opus" {
+		t.Fatalf("expected overridden args, got %#v", cfg.args)
+	}
+}
+
+func TestResolveBackendRejectsCodexWithoutJSONArg(t *testing.T) {
+	t.Parallel()
+
+	_, err := resolveBackend("codex", userConfig{
+		Backends: map[string]configuredBackend{
+			"codex": {
+				Args: []string{"exec", "--sandbox", "read-only"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for codex backend without --json")
+	}
+	if !strings.Contains(err.Error(), "must include --json") {
+		t.Fatalf("expected --json validation error, got %v", err)
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -115,6 +116,9 @@ func TestBuildBuiltinBackendCodexIncludesJSONFlag(t *testing.T) {
 
 	if !found {
 		t.Fatal("expected codex backend args to include --json")
+	}
+	if !cfg.useTempDir {
+		t.Fatal("expected codex builtin backend to use a temporary working directory")
 	}
 }
 
@@ -229,6 +233,9 @@ func TestResolveBackendUsesCustomBackendDefinition(t *testing.T) {
 	if cfg.mode != backendModeStreaming {
 		t.Fatalf("expected streaming mode, got %q", cfg.mode)
 	}
+	if cfg.useTempDir {
+		t.Fatal("expected custom backend to inherit the caller working directory")
+	}
 	if strings.Join(cfg.args, " ") != "-p --model sonnet" {
 		t.Fatalf("expected custom args, got %#v", cfg.args)
 	}
@@ -252,8 +259,59 @@ func TestResolveBackendOverridesBuiltinArgsAndPath(t *testing.T) {
 	if cfg.binary != "/Users/you/bin/claude" {
 		t.Fatalf("expected overridden path, got %q", cfg.binary)
 	}
+	if !cfg.useTempDir {
+		t.Fatal("expected built-in backend overrides to keep the temporary working directory behavior")
+	}
 	if strings.Join(cfg.args, " ") != "-p --model opus" {
 		t.Fatalf("expected overridden args, got %#v", cfg.args)
+	}
+}
+
+func TestPrepareBackendCommandUsesTempDirWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	cmd, cleanup, err := prepareBackendCommand(backendConfig{
+		binary:     "claude",
+		args:       []string{"-p"},
+		useTempDir: true,
+	}, "what is tail recursion?")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cmd.Dir == "" {
+		t.Fatal("expected command to run from a temporary directory")
+	}
+
+	entries, err := os.ReadDir(cmd.Dir)
+	if err != nil {
+		t.Fatalf("failed to read temp dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected temp dir to start empty, got %d entries", len(entries))
+	}
+
+	cleanup()
+
+	if _, err := os.Stat(cmd.Dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected cleanup to remove temp dir, got err=%v", err)
+	}
+}
+
+func TestPrepareBackendCommandLeavesDirUnsetWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	cmd, cleanup, err := prepareBackendCommand(backendConfig{
+		binary: "claude",
+		args:   []string{"-p"},
+	}, "what is tail recursion?")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer cleanup()
+
+	if cmd.Dir != "" {
+		t.Fatalf("expected command to inherit the caller working directory, got %q", cmd.Dir)
 	}
 }
 

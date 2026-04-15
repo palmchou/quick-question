@@ -38,9 +38,10 @@ Now answer the question to your best knowledge.</system-reminder>
 const spinnerMessage = "Waiting for response..."
 
 type backendConfig struct {
-	binary string
-	args   []string
-	mode   backendMode
+	binary     string
+	args       []string
+	mode       backendMode
+	useTempDir bool
 }
 
 type backendMode string
@@ -112,7 +113,13 @@ func run(args []string) int {
 }
 
 func runStreamingBackend(cfg backendConfig, question string) int {
-	cmd := exec.Command(cfg.binary, append(cfg.args, question)...)
+	cmd, cleanup, err := prepareBackendCommand(cfg, question)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer cleanup()
+
 	cmd.Stdin = os.Stdin
 
 	stdout, err := cmd.StdoutPipe()
@@ -309,8 +316,33 @@ func resolveBinaryPath(binary string) (string, error) {
 	return exec.LookPath(binary)
 }
 
-func runCodex(cfg backendConfig, question string) int {
+func prepareBackendCommand(cfg backendConfig, question string) (*exec.Cmd, func(), error) {
 	cmd := exec.Command(cfg.binary, append(cfg.args, question)...)
+
+	if !cfg.useTempDir {
+		return cmd, func() {}, nil
+	}
+
+	dir, err := os.MkdirTemp("", "qq-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create temporary backend directory: %w", err)
+	}
+
+	cmd.Dir = dir
+
+	return cmd, func() {
+		_ = os.RemoveAll(dir)
+	}, nil
+}
+
+func runCodex(cfg backendConfig, question string) int {
+	cmd, cleanup, err := prepareBackendCommand(cfg, question)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer cleanup()
+
 	cmd.Stdin = os.Stdin
 
 	stdout, err := cmd.StdoutPipe()
@@ -542,19 +574,22 @@ func buildBuiltinBackend(name string) (backendConfig, bool) {
 				"--sandbox",
 				"read-only",
 			},
-			mode: backendModeCodexJSON,
+			mode:       backendModeCodexJSON,
+			useTempDir: true,
 		}, true
 	case "claude":
 		return backendConfig{
-			binary: "claude",
-			args:   []string{"-p"},
-			mode:   backendModeStreaming,
+			binary:     "claude",
+			args:       []string{"-p"},
+			mode:       backendModeStreaming,
+			useTempDir: true,
 		}, true
 	case "gemini":
 		return backendConfig{
-			binary: "gemini",
-			args:   []string{"-p"},
-			mode:   backendModeStreaming,
+			binary:     "gemini",
+			args:       []string{"-p"},
+			mode:       backendModeStreaming,
+			useTempDir: true,
 		}, true
 	default:
 		return backendConfig{}, false

@@ -8,6 +8,7 @@ A minimal CLI tool for asking quick questions to AI assistants from your termina
 qq "what does git rebase --onto do?"
 qq --backend claude "explain CAP theorem in one paragraph"
 qq --backend gemini "what is tail recursion?"
+qq -c "explain the files in this directory"
 qq --backend work-claude "summarize Raft leader election"
 ```
 
@@ -88,7 +89,7 @@ The `--backend` flag still takes precedence over `default_backend`.
 | `claude`| `claude -p` |
 | `gemini`| `gemini -p` |
 
-Built-in backends run from a fresh, empty temporary working directory on each invocation.
+Built-in backends run from a fresh, empty temporary working directory on each invocation by default. Pass `-c` or `--cwd-context` to run them from your current working directory instead.
 
 Custom backends use the configured `path` and `args` from `config.json` and inherit the caller's current working directory unless the configured wrapper changes it.
 
@@ -97,10 +98,11 @@ Custom backends use the configured `path` and `args` from `config.json` and inhe
 | Flag | Description |
 |------|-------------|
 | `--backend` | Backend name to use. This can be a built-in backend or a custom backend defined in config. |
+| `-c`, `--cwd-context` | Use the current working directory as backend context instead of the default empty temporary directory. |
 
 ## Notes
 
 - `go install github.com/palmchou/quick-question@latest` would produce a `quick-question` binary, not `qq`. To install a `qq` binary directly, the Go entrypoint lives at `cmd/qq`.
-- Built-in backends (`codex`, `claude`, and `gemini`) start in a fresh empty temporary directory by default, even if you override their `path` or `args` in config.
+- Built-in backends (`codex`, `claude`, and `gemini`) start in a fresh empty temporary directory by default, even if you override their `path` or `args` in config. Pass `-c` or `--cwd-context` when you want the built-in backend to see your current directory instead.
 - On interactive terminals, `qq` shows a small spinner on `stderr` while the selected backend is still silent. It clears itself as soon as output starts or the command finishes, so redirected output is not polluted.
 - If you override the built-in `codex` backend, keep `--json` in its args. `qq` expects Codex JSON output so it can print the final answer cleanly.

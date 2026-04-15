@@ -22,6 +22,9 @@ func run(args []string) int {
 	flags.SetOutput(os.Stderr)
 
 	backendName := flags.String("backend", defaultBackendName(cfg), "Backend name to use")
+	var cwdContext bool
+	flags.BoolVar(&cwdContext, "cwd-context", false, "Use current working directory as backend context")
+	flags.BoolVar(&cwdContext, "c", false, "Alias for --cwd-context")
 
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -29,7 +32,7 @@ func run(args []string) int {
 
 	question := strings.TrimSpace(strings.Join(flags.Args(), " "))
 	if question == "" {
-		fmt.Fprintln(os.Stderr, `usage: qq [--backend name] "your question"`)
+		fmt.Fprintln(os.Stderr, `usage: qq [--backend name] [-c|--cwd-context] "your question"`)
 		return 2
 	}
 
@@ -44,7 +47,9 @@ func run(args []string) int {
 		return 127
 	}
 
-	return runBackend(backend, wrapQuestion(question))
+	backend = applyCurrentDirContext(backend, cwdContext)
+
+	return runBackend(backend, wrapQuestion(question, !backend.UseTempDir))
 }
 
 func defaultBackendName(cfg userConfig) string {

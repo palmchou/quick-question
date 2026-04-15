@@ -22,6 +22,7 @@ func run(args []string) int {
 	flags.SetOutput(os.Stderr)
 
 	backendName := flags.String("backend", defaultBackendName(cfg), "Backend name to use")
+	cwdContext := flags.Bool("cwd-context", false, "Use current working directory as backend context")
 
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -29,7 +30,7 @@ func run(args []string) int {
 
 	question := strings.TrimSpace(strings.Join(flags.Args(), " "))
 	if question == "" {
-		fmt.Fprintln(os.Stderr, `usage: qq [--backend name] "your question"`)
+		fmt.Fprintln(os.Stderr, `usage: qq [--backend name] [--cwd-context] "your question"`)
 		return 2
 	}
 
@@ -43,6 +44,8 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "%s is not installed, not executable, or not on PATH\n", backend.Path)
 		return 127
 	}
+
+	backend = applyCurrentDirContext(backend, *cwdContext)
 
 	return runBackend(backend, wrapQuestion(question))
 }

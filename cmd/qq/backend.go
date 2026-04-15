@@ -118,6 +118,14 @@ func mergeBackendDefinition(base backendDefinition, override backendDefinition) 
 	return base
 }
 
+func applyCurrentDirContext(backend backendDefinition, enabled bool) backendDefinition {
+	if enabled {
+		backend.UseTempDir = false
+	}
+
+	return backend
+}
+
 func normalizeBackendName(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }

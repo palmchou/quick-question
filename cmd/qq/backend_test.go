@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -187,6 +188,36 @@ func TestResolveBackendOverridesBuiltinArgsAndPath(t *testing.T) {
 	}
 	if strings.Join(cfg.Args, " ") != "-p --model opus" {
 		t.Fatalf("expected overridden args, got %#v", cfg.Args)
+	}
+}
+
+func TestApplyCurrentDirContextDisablesTempDir(t *testing.T) {
+	t.Parallel()
+
+	got := applyCurrentDirContext(backendDefinition{
+		Path:       "claude",
+		Args:       []string{"-p"},
+		UseTempDir: true,
+	}, true)
+
+	if got.UseTempDir {
+		t.Fatal("expected current-dir context to disable the temporary working directory")
+	}
+}
+
+func TestApplyCurrentDirContextLeavesBackendUnchangedWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	want := backendDefinition{
+		Path:       "claude",
+		Args:       []string{"-p"},
+		Mode:       backendModeStreaming,
+		UseTempDir: true,
+	}
+
+	got := applyCurrentDirContext(want, false)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected backend to remain unchanged, got %#v", got)
 	}
 }
 

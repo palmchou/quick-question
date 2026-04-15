@@ -88,7 +88,9 @@ The `--backend` flag still takes precedence over `default_backend`.
 | `claude`| `claude -p` |
 | `gemini`| `gemini -p` |
 
-Custom backends use the configured `path` and `args` from `config.json`.
+Built-in backends run from a fresh, empty temporary working directory on each invocation.
+
+Custom backends use the configured `path` and `args` from `config.json` and inherit the caller's current working directory unless the configured wrapper changes it.
 
 ### Options
 
@@ -99,5 +101,6 @@ Custom backends use the configured `path` and `args` from `config.json`.
 ## Notes
 
 - `go install github.com/palmchou/quick-question@latest` would produce a `quick-question` binary, not `qq`. To install a `qq` binary directly, the Go entrypoint lives at `cmd/qq`.
+- Built-in backends (`codex`, `claude`, and `gemini`) start in a fresh empty temporary directory by default, even if you override their `path` or `args` in config.
 - On interactive terminals, `qq` shows a small spinner on `stderr` while the selected backend is still silent. It clears itself as soon as output starts or the command finishes, so redirected output is not polluted.
 - If you override the built-in `codex` backend, keep `--json` in its args. `qq` expects Codex JSON output so it can print the final answer cleanly.

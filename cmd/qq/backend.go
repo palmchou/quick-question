@@ -15,9 +15,10 @@ const (
 )
 
 type backendDefinition struct {
-	Path string      `json:"path"`
-	Args []string    `json:"args"`
-	Mode backendMode `json:"-"`
+	Path       string      `json:"path"`
+	Args       []string    `json:"args"`
+	Mode       backendMode `json:"-"`
+	UseTempDir bool        `json:"-"`
 }
 
 func builtinBackends() map[string]backendDefinition {
@@ -32,17 +33,20 @@ func builtinBackends() map[string]backendDefinition {
 				"--sandbox",
 				"read-only",
 			},
-			Mode: backendModeCodexJSON,
+			Mode:       backendModeCodexJSON,
+			UseTempDir: true,
 		},
 		"claude": {
-			Path: "claude",
-			Args: []string{"-p"},
-			Mode: backendModeStreaming,
+			Path:       "claude",
+			Args:       []string{"-p"},
+			Mode:       backendModeStreaming,
+			UseTempDir: true,
 		},
 		"gemini": {
-			Path: "gemini",
-			Args: []string{"-p"},
-			Mode: backendModeStreaming,
+			Path:       "gemini",
+			Args:       []string{"-p"},
+			Mode:       backendModeStreaming,
+			UseTempDir: true,
 		},
 	}
 }

@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -119,5 +121,53 @@ func TestProxyCommandOutputSkipsStopWhenNoOutputArrives(t *testing.T) {
 	}
 	if stops != 0 {
 		t.Fatalf("expected spinner stop callback not to run, got %d", stops)
+	}
+}
+
+func TestPrepareBackendCommandUsesTempDirWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	cmd, cleanup, err := prepareBackendCommand(backendDefinition{
+		Path:       "claude",
+		Args:       []string{"-p"},
+		UseTempDir: true,
+	}, "what is tail recursion?")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cmd.Dir == "" {
+		t.Fatal("expected command to run from a temporary directory")
+	}
+
+	entries, err := os.ReadDir(cmd.Dir)
+	if err != nil {
+		t.Fatalf("failed to read temp dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected temp dir to start empty, got %d entries", len(entries))
+	}
+
+	cleanup()
+
+	if _, err := os.Stat(cmd.Dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected cleanup to remove temp dir, got err=%v", err)
+	}
+}
+
+func TestPrepareBackendCommandLeavesDirUnsetWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	cmd, cleanup, err := prepareBackendCommand(backendDefinition{
+		Path: "claude",
+		Args: []string{"-p"},
+	}, "what is tail recursion?")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer cleanup()
+
+	if cmd.Dir != "" {
+		t.Fatalf("expected command to inherit the caller working directory, got %q", cmd.Dir)
 	}
 }

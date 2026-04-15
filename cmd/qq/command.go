@@ -24,7 +24,13 @@ func runBackend(backend backendDefinition, question string) int {
 }
 
 func runStreamingBackend(backend backendDefinition, question string) int {
-	cmd := exec.Command(backend.Path, append(backend.Args, question)...)
+	cmd, cleanup, err := prepareBackendCommand(backend, question)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer cleanup()
+
 	cmd.Stdin = os.Stdin
 
 	stdout, err := cmd.StdoutPipe()
@@ -93,7 +99,13 @@ func runStreamingBackend(backend backendDefinition, question string) int {
 }
 
 func runCodex(backend backendDefinition, question string) int {
-	cmd := exec.Command(backend.Path, append(backend.Args, question)...)
+	cmd, cleanup, err := prepareBackendCommand(backend, question)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer cleanup()
+
 	cmd.Stdin = os.Stdin
 
 	stdout, err := cmd.StdoutPipe()
@@ -149,6 +161,25 @@ func runCodex(backend backendDefinition, question string) int {
 type copyResult struct {
 	stream string
 	err    error
+}
+
+func prepareBackendCommand(backend backendDefinition, question string) (*exec.Cmd, func(), error) {
+	cmd := exec.Command(backend.Path, append(backend.Args, question)...)
+
+	if !backend.UseTempDir {
+		return cmd, func() {}, nil
+	}
+
+	dir, err := os.MkdirTemp("", "qq-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create temporary backend directory: %w", err)
+	}
+
+	cmd.Dir = dir
+
+	return cmd, func() {
+		_ = os.RemoveAll(dir)
+	}, nil
 }
 
 func proxyCommandOutput(dst io.Writer, src io.Reader, once *sync.Once, onFirstOutput func()) error {

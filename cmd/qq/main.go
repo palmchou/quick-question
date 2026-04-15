@@ -49,7 +49,7 @@ func run(args []string) int {
 
 	backend = applyCurrentDirContext(backend, cwdContext)
 
-	return runBackend(backend, wrapQuestion(question))
+	return runBackend(backend, wrapQuestion(question, !backend.UseTempDir))
 }
 
 func defaultBackendName(cfg userConfig) string {

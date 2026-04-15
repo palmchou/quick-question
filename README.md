@@ -42,7 +42,7 @@ source ~/.zshrc
 ~/.config/qq/config.json
 ```
 
-The config file can set a default backend, override built-in backends, and define entirely new named backends:
+The config file can set a default backend, override built-in backends, and define entirely new named backends. Built-in backends are treated as default backend definitions, so `backends.codex`, `backends.claude`, and `backends.gemini` use the same `path` and `args` shape as any custom backend:
 
 ```json
 {
